@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+.pytest_cache/
+.vscode/
+data/raw/
+*.csv
+*.pkl
+*.pth
+*.onnx
+.streamlit/secrets.toml

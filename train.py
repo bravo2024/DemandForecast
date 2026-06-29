@@ -16,10 +16,12 @@ from src.models import (
     HoltWinters,
     ARIMAForecaster,
     SARIMAForecaster,
+    CausalTransformerForecaster,
     compare_models,
 )
 from src.persist import save_model
 from src.core import rmse
+from src.evaluate import save_metrics, print_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,9 +33,9 @@ def parse_args() -> argparse.Namespace:
         "--models",
         nargs="+",
         default=["naive", "ridge", "hw"],
-        choices=["naive", "ridge", "rf", "hw", "arima", "sarima"],
+        choices=["naive", "ridge", "rf", "hw", "arima", "sarima", "transformer"],
         help="Model(s) to train.  Multiple values accepted.  "
-             "Options: naive, ridge, rf, hw, arima, sarima.",
+             "Options: naive, ridge, rf, hw, arima, sarima, transformer.",
     )
     parser.add_argument(
         "--horizon",
@@ -130,6 +132,10 @@ def main() -> None:
                 order=(args.arima_p, args.arima_d, args.arima_q),
                 seasonal_order=(1, 0, 1, args.sarima_s),
             )
+        elif m == "transformer":
+            models["CausalTransformer"] = CausalTransformerForecaster(
+                window=28, hidden=32, n_heads=2
+            )
 
     print(f"\nRunning walk-forward validation: horizon={args.horizon}, "
           f"windows={args.windows}")
@@ -143,6 +149,7 @@ def main() -> None:
 
     best_name = None
     best_rmse = float("inf")
+    summary_metrics: dict = {"horizon": int(args.horizon), "windows": int(args.windows)}
     for name, r in results.items():
         metric_rmse = r.get("rmse", np.nan)
         metric_mae = r.get("mae", np.nan)
@@ -154,15 +161,24 @@ def main() -> None:
 
         print(f"{name:<20} {rmse_str:>10} {mae_str:>10} {smape_str:>8}")
 
-        if np.isfinite(metric_rmse) and metric_rmse < best_rmse:
-            best_rmse = metric_rmse
-            best_name = name
+        if np.isfinite(metric_rmse):
+            summary_metrics[name] = {
+                "rmse": float(metric_rmse),
+                "mae": float(metric_mae) if np.isfinite(metric_mae) else None,
+                "smape": float(metric_smape) if np.isfinite(metric_smape) else None,
+            }
+            if metric_rmse < best_rmse:
+                best_rmse = metric_rmse
+                best_name = name
 
     print("=" * 60)
     if best_name:
         print(f"Best model: {best_name} (RMSE = {best_rmse:.2f})")
+        summary_metrics["best_model"] = best_name
     else:
         print("All models failed — check data or hyperparameters.")
+    save_metrics(summary_metrics)
+    print(f"\nMetrics saved to {os.path.join(args.output_dir, 'metrics.json')}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
